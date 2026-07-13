@@ -57,7 +57,38 @@ st.sidebar.title("Navegação")
 menu = st.sidebar.radio("Ir para:", ["Novo Pedido", "Receber Entregas", "Visão Geral"])
 
 if menu == "Novo Pedido":
-    st.title("🛒 Emitir Novo Pedido")
+# Função rápida para ler os fornecedores que já existem no banco
+    def obter_fornecedores():
+        conn = sqlite3.connect('compras_loja.db')
+        cursor = conn.cursor()
+        cursor.execute("SELECT DISTINCT fornecedor FROM pedidos")
+        resultados = cursor.fetchall()
+        conn.close()
+        
+        # Cria uma lista limpa com os nomes
+        lista = [linha[0] for linha in resultados if linha[0]]
+        
+        # Se a lista estiver vazia (banco novo), colocamos a DAOBRAZ como base
+        if not lista:
+            lista = ["DAOBRAZ"]
+            
+        lista.append("+ Adicionar Novo Fornecedor")
+        return lista
+
+    col_data, col_forn = st.columns(2)
+    
+    with col_data:
+        data_pedido = st.date_input("Data do Pedido", format="DD/MM/YYYY")
+        
+    with col_forn:
+        lista_fornecedores = obter_fornecedores()
+        escolha_fornecedor = st.selectbox("Fornecedor", lista_fornecedores)
+        
+        # Se escolher adicionar novo, abre o campo para digitar
+        if escolha_fornecedor == "+ Adicionar Novo Fornecedor":
+            fornecedor = st.text_input("Digite o nome do novo fornecedor:")
+        else:
+            fornecedor = escolha_fornecedor
     
     col_data, col_forn = st.columns(2)
     
