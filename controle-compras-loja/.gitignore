@@ -1,0 +1,11 @@
+# Ignorar o banco de dados real
+*.db
+*.sqlite3
+/banco_de_dados/
+
+# Ignorar PDFs gerados temporariamente
+*.pdf
+
+# Ignorar pastas virtuais do Python
+venv/
+__pycache__/
