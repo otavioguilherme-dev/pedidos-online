@@ -8,7 +8,6 @@ def iniciar_banco():
     conn = sqlite3.connect('compras_loja.db')
     cursor = conn.cursor()
     
-    # Tabela de Pedidos
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS pedidos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -18,7 +17,6 @@ def iniciar_banco():
         )
     ''')
     
-    # Tabela de Itens (O que foi pedido)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS itens_pedido (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,7 +28,6 @@ def iniciar_banco():
         )
     ''')
     
-    # NOVA TABELA: Histórico de Recebimentos (Para as entregas parciais com data)
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS recebimentos (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,7 +54,8 @@ st.sidebar.title("Navegação")
 menu = st.sidebar.radio("Ir para:", ["Novo Pedido", "Receber Entregas", "Visão Geral"])
 
 if menu == "Novo Pedido":
-# Função rápida para ler os fornecedores que já existem no banco
+    st.title("🛒 Emitir Novo Pedido")
+
     def obter_fornecedores():
         conn = sqlite3.connect('compras_loja.db')
         cursor = conn.cursor()
@@ -65,16 +63,15 @@ if menu == "Novo Pedido":
         resultados = cursor.fetchall()
         conn.close()
         
-        # Cria uma lista limpa com os nomes
         lista = [linha[0] for linha in resultados if linha[0]]
         
-        # Se a lista estiver vazia (banco novo), colocamos a DAOBRAZ como base
         if not lista:
             lista = ["DAOBRAZ"]
             
         lista.append("+ Adicionar Novo Fornecedor")
         return lista
 
+    # --- BLOCO CORRIGIDO: Colunas aparecem apenas uma vez ---
     col_data, col_forn = st.columns(2)
     
     with col_data:
@@ -84,21 +81,12 @@ if menu == "Novo Pedido":
         lista_fornecedores = obter_fornecedores()
         escolha_fornecedor = st.selectbox("Fornecedor", lista_fornecedores)
         
-        # Se escolher adicionar novo, abre o campo para digitar
         if escolha_fornecedor == "+ Adicionar Novo Fornecedor":
             fornecedor = st.text_input("Digite o nome do novo fornecedor:")
         else:
             fornecedor = escolha_fornecedor
-    
-    col_data, col_forn = st.columns(2)
-    
-    with col_data:
-        # 1. Campo de Data agora é digitável/selecionável
-        data_pedido = st.date_input("Data do Pedido", format="DD/MM/YYYY")
-        
-    with col_forn:
-        fornecedor = st.selectbox("Fornecedor", ["DAOBRAZ", "Outro"])
-    
+    # --------------------------------------------------------
+
     st.markdown("---")
     st.subheader("Adicionar Produtos ao Pedido")
     
@@ -124,18 +112,46 @@ if menu == "Novo Pedido":
         st.dataframe(df_itens, use_container_width=True)
         
         if st.button("Finalizar e Salvar Pedido Inteiro", type="primary"):
-            # A data precisa ser convertida para texto (string) para salvar no SQLite
-            data_str = data_pedido.strftime("%d/%m/%Y")
-            st.info(f"Gravando no banco: Pedido de {fornecedor} na data {data_str}...")
+            # Validação para não salvar sem fornecedor
+            if not fornecedor or fornecedor.strip() == "":
+                st.error("⚠️ Por favor, informe o nome do fornecedor antes de salvar.")
+            else:
+                data_str = data_pedido.strftime("%d/%m/%Y")
+                
+                # --- CONECTA E GRAVA NO BANCO DE DADOS ---
+                conn = sqlite3.connect('compras_loja.db')
+                cursor = conn.cursor()
+                
+                # 1. Salva o Pedido
+                cursor.execute('''
+                    INSERT INTO pedidos (fornecedor, data_pedido, status) 
+                    VALUES (?, ?, ?)
+                ''', (fornecedor.strip(), data_str, "Pendente"))
+                
+                # Pega o ID gerado para este novo pedido
+                pedido_id = cursor.lastrowid 
+                
+                # 2. Salva os Itens vinculados a este Pedido
+                for item in st.session_state['itens_atuais']:
+                    cursor.execute('''
+                        INSERT INTO itens_pedido (pedido_id, sku, qtd_pedida, qtd_recebida)
+                        VALUES (?, ?, ?, 0)
+                    ''', (pedido_id, item['SKU'], item['Quantidade']))
+                
+                conn.commit()
+                conn.close()
+                
+                # 3. Limpa a lista da tela e avisa o usuário
+                st.session_state['itens_atuais'] = []
+                st.success(f"✅ Pedido #{pedido_id} salvo com sucesso! O banco de dados foi atualizado.")
+                st.rerun() # Recarrega a tela instantaneamente
 
 elif menu == "Receber Entregas":
     st.title("📦 Baixa de Entregas Parciais")
     st.markdown("Registre a entrada de mercadorias no estoque.")
     
-    # 2. Inclusão da data de recebimento
     data_recebimento = st.date_input("Data de Recebimento", format="DD/MM/YYYY")
     
-    # Estrutura visual de como ficará a baixa (conectaremos ao banco depois)
     pedido_selecionado = st.selectbox("Selecione o Pedido Pendente", ["Pedido #1 - DAOBRAZ (13/07/2026)", "Pedido #2 - Outro (10/07/2026)"])
     sku_recebido = st.selectbox("Selecione o SKU desta entrega", ["086050 (Faltam 50 unid.)", "104022 (Faltam 10 unid.)"])
     qtd_chegou = st.number_input("Quantidade que chegou nesta data", min_value=1, step=1)
