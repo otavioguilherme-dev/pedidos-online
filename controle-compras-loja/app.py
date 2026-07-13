@@ -1,39 +1,68 @@
 import streamlit as st
+import sqlite3
 import pandas as pd
+from datetime import datetime
 
-# Simulando uma busca rápida no seu banco de dados (ex: SQLite)
-def checar_pedidos_pendentes(sku):
-    # Imagine que aqui o Python consulta o banco de dados
-    banco_de_dados_simulado = {
-        "086050": 30,  # Tem 30 caixas pendentes de entrega
-        "104022": 0    # Totalmente entregue
-    }
-    return banco_de_dados_simulado.get(sku, 0)
-
-st.title("🛒 Emitir Novo Pedido de Compra")
-
-# Seleção do Fornecedor
-fornecedor = st.selectbox("Selecione o Fornecedor", ["DAOBRAZ", "Outro Fornecedor"])
-
-st.subheader("Adicionar Itens")
-
-col1, col2 = st.columns(2)
-with col1:
-    sku_digitado = st.text_input("Digite o código SKU:")
-with col2:
-    qtd_desejada = st.number_input("Quantidade (Caixas):", min_value=1, step=1)
-
-# A Mágica contra Compras Duplicadas
-if sku_digitado:
-    pendentes = checar_pedidos_pendentes(sku_digitado)
+# --- CONFIGURAÇÃO DO BANCO DE DADOS ---
+def iniciar_banco():
+    conn = sqlite3.connect('compras_loja.db')
+    cursor = conn.cursor()
     
-    if pendentes > 0:
-        st.error(f"⚠️ Atenção: O SKU {sku_digitado} já tem {pendentes} caixas com entrega pendente!")
-    else:
-        st.success("Item sem pedidos pendentes. Liberado para compra.")
+    # Tabela de Pedidos
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS pedidos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            fornecedor TEXT,
+            data_pedido TEXT,
+            status TEXT
+        )
+    ''')
+    
+    # Tabela de Itens (Controla as entregas parciais)
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS itens_pedido (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pedido_id INTEGER,
+            sku TEXT,
+            qtd_pedida INTEGER,
+            qtd_recebida INTEGER DEFAULT 0,
+            FOREIGN KEY(pedido_id) REFERENCES pedidos(id)
+        )
+    ''')
+    conn.commit()
+    conn.close()
 
-# Botão para adicionar ao "Carrinho" e gerar PDF
-if st.button("Gravar Pedido e Gerar PDF"):
-    # Aqui entraria a lógica de salvar no SQLite e chamar o WeasyPrint
-    st.balloons()
-    st.success("Pedido gravado com sucesso! Iniciando download do PDF...")
+# Executa a criação do banco ao abrir o app
+iniciar_banco()
+
+# --- INTERFACE STREAMLIT ---
+st.set_page_config(page_title="Controle de Compras", layout="wide")
+
+st.sidebar.title("Navegação")
+menu = st.sidebar.radio("Ir para:", ["Novo Pedido", "Receber Entregas", "Visão Geral"])
+
+if menu == "Novo Pedido":
+    st.title("🛒 Emitir Novo Pedido")
+    
+    with st.form("form_pedido"):
+        fornecedor = st.selectbox("Fornecedor", ["DAOBRAZ", "Outro"])
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            sku = st.text_input("Código SKU")
+        with col2:
+            qtd = st.number_input("Quantidade (Caixas)", min_value=1, step=1)
+            
+        submit = st.form_submit_button("Adicionar ao Pedido")
+        
+        if submit:
+            # Aqui entrará a trava de segurança contra duplicidade!
+            st.success(f"Item {sku} adicionado com sucesso para o fornecedor {fornecedor}!")
+
+elif menu == "Receber Entregas":
+    st.title("📦 Baixa de Entregas Parciais")
+    st.info("Aqui você selecionará um pedido e informará quantas caixas chegaram hoje.")
+
+elif menu == "Visão Geral":
+    st.title("📊 Painel de Controle")
+    st.info("Aqui você verá os itens com saldo pendente.")
