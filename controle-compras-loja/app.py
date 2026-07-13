@@ -43,7 +43,7 @@ def iniciar_banco():
 
 iniciar_banco()
 
-# --- CONFIGURAÇÃO DE ESTADO (Para o "Carrinho" de itens) ---
+# --- CONFIGURAÇÃO DE ESTADO ---
 if 'itens_atuais' not in st.session_state:
     st.session_state['itens_atuais'] = []
 
@@ -51,7 +51,8 @@ if 'itens_atuais' not in st.session_state:
 st.set_page_config(page_title="Controle de Compras", layout="wide")
 
 st.sidebar.title("Navegação")
-menu = st.sidebar.radio("Ir para:", ["Novo Pedido", "Receber Entregas", "Visão Geral"])
+# Adicionamos a nova opção de menu aqui!
+menu = st.sidebar.radio("Ir para:", ["Novo Pedido", "Receber Entregas", "Gerenciar Pedidos", "Visão Geral"])
 
 if menu == "Novo Pedido":
     st.title("🛒 Emitir Novo Pedido")
@@ -64,14 +65,12 @@ if menu == "Novo Pedido":
         conn.close()
         
         lista = [linha[0] for linha in resultados if linha[0]]
-        
         if not lista:
             lista = ["DAOBRAZ"]
             
         lista.append("+ Adicionar Novo Fornecedor")
         return lista
 
-    # --- BLOCO CORRIGIDO: Colunas aparecem apenas uma vez ---
     col_data, col_forn = st.columns(2)
     
     with col_data:
@@ -85,7 +84,6 @@ if menu == "Novo Pedido":
             fornecedor = st.text_input("Digite o nome do novo fornecedor:")
         else:
             fornecedor = escolha_fornecedor
-    # --------------------------------------------------------
 
     st.markdown("---")
     st.subheader("Adicionar Produtos ao Pedido")
@@ -112,26 +110,21 @@ if menu == "Novo Pedido":
         st.dataframe(df_itens, use_container_width=True)
         
         if st.button("Finalizar e Salvar Pedido Inteiro", type="primary"):
-            # Validação para não salvar sem fornecedor
             if not fornecedor or fornecedor.strip() == "":
                 st.error("⚠️ Por favor, informe o nome do fornecedor antes de salvar.")
             else:
                 data_str = data_pedido.strftime("%d/%m/%Y")
                 
-                # --- CONECTA E GRAVA NO BANCO DE DADOS ---
                 conn = sqlite3.connect('compras_loja.db')
                 cursor = conn.cursor()
                 
-                # 1. Salva o Pedido
                 cursor.execute('''
                     INSERT INTO pedidos (fornecedor, data_pedido, status) 
                     VALUES (?, ?, ?)
                 ''', (fornecedor.strip(), data_str, "Pendente"))
                 
-                # Pega o ID gerado para este novo pedido
                 pedido_id = cursor.lastrowid 
                 
-                # 2. Salva os Itens vinculados a este Pedido
                 for item in st.session_state['itens_atuais']:
                     cursor.execute('''
                         INSERT INTO itens_pedido (pedido_id, sku, qtd_pedida, qtd_recebida)
@@ -141,10 +134,9 @@ if menu == "Novo Pedido":
                 conn.commit()
                 conn.close()
                 
-                # 3. Limpa a lista da tela e avisa o usuário
                 st.session_state['itens_atuais'] = []
                 st.success(f"✅ Pedido #{pedido_id} salvo com sucesso! O banco de dados foi atualizado.")
-                st.rerun() # Recarrega a tela instantaneamente
+                st.rerun()
 
 elif menu == "Receber Entregas":
     st.title("📦 Baixa de Entregas Parciais")
@@ -159,6 +151,74 @@ elif menu == "Receber Entregas":
     if st.button("Registrar Entrada"):
         data_rec_str = data_recebimento.strftime("%d/%m/%Y")
         st.success(f"Registrado o recebimento de {qtd_chegou} unidades em {data_rec_str}!")
+
+# --- NOVA TELA DE GERENCIAMENTO ---
+elif menu == "Gerenciar Pedidos":
+    st.title("⚙️ Gerenciar e Excluir Pedidos")
+    st.markdown("Aqui você pode apagar itens específicos ou cancelar um pedido inteiro. **Atenção: A exclusão é permanente.**")
+    
+    conn = sqlite3.connect('compras_loja.db')
+    
+    # Busca os pedidos no banco
+    pedidos_df = pd.read_sql_query("SELECT id, fornecedor, data_pedido FROM pedidos", conn)
+    
+    if pedidos_df.empty:
+        st.info("Não há nenhum pedido cadastrado no momento.")
+    else:
+        # Formata a lista para o Selectbox ficar legível
+        opcoes_pedidos = pedidos_df.apply(lambda row: f"Pedido #{row['id']} - {row['fornecedor']} ({row['data_pedido']})", axis=1).tolist()
+        pedido_selecionado = st.selectbox("1. Selecione o pedido que deseja gerenciar:", opcoes_pedidos)
+        
+        # Extrai apenas o ID numérico da string (Ex: Pega "1" de "Pedido #1 - DAOBRAZ")
+        pedido_id = int(pedido_selecionado.split("#")[1].split(" -")[0])
+        
+        st.markdown(f"### Itens do Pedido #{pedido_id}")
+        itens_df = pd.read_sql_query(f"SELECT id, sku, qtd_pedida, qtd_recebida FROM itens_pedido WHERE pedido_id = {pedido_id}", conn)
+        st.dataframe(itens_df, use_container_width=True)
+        
+        col_item, col_pedido = st.columns(2)
+        
+        # Opção A: Excluir Apenas um Item
+        with col_item:
+            st.error("Excluir um Item Específico")
+            if not itens_df.empty:
+                opcoes_itens = itens_df.apply(lambda row: f"ID {row['id']} - SKU {row['sku']} ({row['qtd_pedida']} un.)", axis=1).tolist()
+                item_selecionado = st.selectbox("Selecione o item:", opcoes_itens)
+                item_id = int(item_selecionado.split(" ")[1])
+                
+                # Trava de Segurança
+                confirmar_item = st.checkbox(f"Tenho certeza que desejo excluir o item ID {item_id}")
+                if st.button("🗑️ Excluir Item"):
+                    if confirmar_item:
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM recebimentos WHERE item_pedido_id = ?", (item_id,))
+                        cursor.execute("DELETE FROM itens_pedido WHERE id = ?", (item_id,))
+                        conn.commit()
+                        st.success("Item excluído com sucesso!")
+                        st.rerun()
+                    else:
+                        st.warning("⚠️ Marque a caixa de confirmação acima para liberar a exclusão.")
+            else:
+                st.info("Este pedido não possui itens.")
+
+        # Opção B: Excluir o Pedido Inteiro
+        with col_pedido:
+            st.error("Excluir o Pedido Inteiro")
+            # Trava de Segurança
+            confirmar_pedido = st.checkbox(f"Tenho certeza que desejo excluir o Pedido #{pedido_id} COMPLETAMENTE")
+            if st.button("🚨 Apagar Pedido Inteiro"):
+                if confirmar_pedido:
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM recebimentos WHERE item_pedido_id IN (SELECT id FROM itens_pedido WHERE pedido_id = ?)", (pedido_id,))
+                    cursor.execute("DELETE FROM itens_pedido WHERE pedido_id = ?", (pedido_id,))
+                    cursor.execute("DELETE FROM pedidos WHERE id = ?", (pedido_id,))
+                    conn.commit()
+                    st.success("Pedido completo excluído do sistema!")
+                    st.rerun()
+                else:
+                    st.warning("⚠️ Marque a caixa de confirmação acima para liberar a exclusão.")
+                    
+    conn.close()
 
 elif menu == "Visão Geral":
     st.title("📊 Painel de Controle")
